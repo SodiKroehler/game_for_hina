@@ -18,7 +18,9 @@ import {
 } from "@/lib/khet/moves";
 import { cloneGrid, getPiece } from "@/lib/khet/grid";
 import { applyTraceResult, pathToSegments, traceLaser } from "@/lib/khet/laser";
-import { makeMove, applyGameAction } from "@/lib/khet/ai";
+import { applyGameAction } from "@/lib/khet/ai";
+import { getAiEngine } from "@/ai/registry";
+import type { GameBoard } from "@/ai/types";
 
 const LASER_MS = 620;
 const AI_DELAY_MS = 480;
@@ -47,6 +49,32 @@ export default function KhetGame() {
   const [selected, setSelected] = useState<Coord | null>(null);
   const [laserPath, setLaserPath] = useState<Coord[] | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const [engineIds, setEngineIds] = useState<string[]>([]);
+  const [selectedAi, setSelectedAi] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/ai-engines")
+      .then((r) => r.json())
+      .then((d: { engines: string[] }) => {
+        if (cancelled) return;
+        const list = d.engines ?? [];
+        setEngineIds(list);
+        const playable = list.filter((id) => getAiEngine(id));
+        setSelectedAi((prev) =>
+          playable.includes(prev) ? prev : playable[0] ?? "",
+        );
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setEngineIds([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const legalDestinations = useMemo(() => {
     if (!selected || winner !== null || busy || currentPlayer !== 1) return [];
@@ -137,11 +165,14 @@ export default function KhetGame() {
     const epoch = aiEpoch.current;
     const id = window.setTimeout(() => {
       if (epoch !== aiEpoch.current) return;
-      const action = makeMove({
+      const engine = selectedAi ? getAiEngine(selectedAi) : undefined;
+      if (!engine) return;
+      const board: GameBoard = {
         grid: gridRef.current,
         currentPlayer: 2,
         winner: null,
-      });
+      };
+      const action = engine.makeMove(board);
       if (!action) return;
       const g = cloneGrid(gridRef.current);
       applyGameAction(g, action);
@@ -149,7 +180,7 @@ export default function KhetGame() {
       runLaserThenAdvance(g, 2);
     }, AI_DELAY_MS);
     return () => window.clearTimeout(id);
-  }, [currentPlayer, winner, runLaserThenAdvance]);
+  }, [currentPlayer, winner, runLaserThenAdvance, selectedAi]);
 
   const onCellClick = (col: number, row: number) => {
     if (winner !== null || busy) return;
@@ -194,6 +225,29 @@ export default function KhetGame() {
       </header>
 
       <div className="flex flex-wrap items-center justify-center gap-4 text-sm">
+        <label className="flex items-center gap-2 text-stone-400">
+          <span className="whitespace-nowrap">Red AI</span>
+          <select
+            className="rounded-md border border-stone-600 bg-stone-900 px-2 py-1.5 text-stone-200 text-sm min-w-[10rem]"
+            value={selectedAi}
+            onChange={(e) => setSelectedAi(e.target.value)}
+            disabled={busy || engineIds.length === 0}
+            aria-label="Select AI engine"
+          >
+            {engineIds.length === 0 ? (
+              <option value="">Loading…</option>
+            ) : (
+              engineIds.map((id) => {
+                const ok = !!getAiEngine(id);
+                return (
+                  <option key={id} value={id} disabled={!ok}>
+                    {ok ? id : `${id} (register in registry.ts)`}
+                  </option>
+                );
+              })
+            )}
+          </select>
+        </label>
         {winner === null ? (
           <p className="text-stone-300">
             Turn:{" "}

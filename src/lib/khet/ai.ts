@@ -1,4 +1,4 @@
-import type { AiAction, Coord, GameState, Grid, Owner } from "./types";
+import type { AiAction, Coord, Grid, Owner } from "./types";
 import { cloneGrid } from "./grid";
 import { traceLaser } from "./laser";
 import {
@@ -62,21 +62,3 @@ export function enumerateLegalActions(grid: Grid, player: Owner): AiAction[] {
   return actions;
 }
 
-/**
- * AI plays as red (player 2). Prefers any move that immediately hits silver's pharaoh;
- * otherwise picks uniformly at random among legal moves + rotations.
- */
-export function makeMove(state: GameState): AiAction | null {
-  if (state.winner !== null) return null;
-  if (state.currentPlayer !== 2) return null;
-
-  const actions = enumerateLegalActions(state.grid, 2);
-  if (actions.length === 0) return null;
-
-  const wins = actions.filter((a) =>
-    isImmediatePharaohWin(state.grid, 2, a),
-  );
-  const pool = wins.length > 0 ? wins : actions;
-  const pick = pool[Math.floor(Math.random() * pool.length)];
-  return pick;
-}
