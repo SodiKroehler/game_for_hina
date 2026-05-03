@@ -21,7 +21,7 @@ function resolvePiece(
   piece: Piece,
   beamDir: Dir,
 ): { nextDir: Dir | null; outcome: LaserOutcome | null } {
-  const o = ((piece.orientation % 4) + 4) % 4;
+  const o = piece.orientation;
 
   switch (piece.pieceType) {
     case "sphinx":
@@ -75,7 +75,7 @@ export function traceLaser(grid: Grid, firingPlayer: Owner): LaserTrace {
     return { path: [], outcome: { kind: "edge" } };
   }
 
-  let beamDir = (((start.sphinx.orientation % 4) + 4) % 4) as Dir;
+  let beamDir = start.sphinx.orientation as Dir;
   let pos = step(start.coord, beamDir);
   const path: Coord[] = [];
   let steps = 0;

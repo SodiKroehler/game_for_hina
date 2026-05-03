@@ -7,13 +7,23 @@ export type PieceType =
   | "scarab"
   | "anubis";
 
-/** Laser travel / sphinx fire direction: 0=N, 1=E, 2=S, 3=W (screen coords, row grows downward). */
+/** Laser travel / beam direction: 0=N, 1=E, 2=S, 3=W (screen coords, row grows downward). */
 export type Dir = 0 | 1 | 2 | 3;
+
+/**
+ * Piece facing / sphinx laser emission — matches Python-style `Orientation.up` … `Orientation.left`.
+ * Values align with {@link Dir}: up=N, right=E, down=S, left=W.
+ */
+export enum Orientation {
+  up = 0,
+  right = 1,
+  down = 2,
+  left = 3,
+}
 
 export interface Piece {
   pieceType: PieceType;
-  /** 0–3 = 0°/90°/180°/270° clockwise from canonical orientation. */
-  orientation: number;
+  orientation: Orientation;
   owner: Owner;
 }
 

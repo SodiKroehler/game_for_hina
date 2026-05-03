@@ -7,13 +7,13 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Coord, Owner } from "@/lib/khet/types";
-import { pieceLabel } from "@/lib/khet/pieces";
+import type { Coord, Orientation, Owner, Piece } from "@/lib/khet/types";
 import { createClassicGrid } from "@/lib/khet/classicSetup";
 import {
   applyMove,
   canRotatePiece,
   listMoveDestinations,
+  rotateOrientationCw,
   rotatePieceCw,
 } from "@/lib/khet/moves";
 import { cloneGrid, getPiece } from "@/lib/khet/grid";
@@ -21,6 +21,7 @@ import { applyTraceResult, pathToSegments, traceLaser } from "@/lib/khet/laser";
 import { applyGameAction } from "@/lib/khet/ai";
 import { getAiEngine } from "@/ai/registry";
 import type { GameBoard } from "@/ai/types";
+import { PieceGlyph } from "@/components/PieceGlyph";
 
 const LASER_MS = 620;
 const AI_DELAY_MS = 480;
@@ -37,6 +38,19 @@ function coordInList(list: Coord[], c: Coord): boolean {
   return list.some((x) => x.col === c.col && x.row === c.row);
 }
 
+type StagedAction =
+  | null
+  | { kind: "move"; from: Coord; to: Coord }
+  | { kind: "rotate"; at: Coord };
+
+function validateStaged(grid: ReturnType<typeof cloneGrid>, staged: StagedAction): boolean {
+  if (!staged) return false;
+  if (staged.kind === "move") {
+    return coordInList(listMoveDestinations(grid, staged.from, 1), staged.to);
+  }
+  return canRotatePiece(grid, staged.at, 1);
+}
+
 export default function KhetGame() {
   const [grid, setGrid] = useState(() => createClassicGrid());
   const gridRef = useRef(grid);
@@ -47,6 +61,7 @@ export default function KhetGame() {
   const [currentPlayer, setCurrentPlayer] = useState<Owner>(1);
   const [winner, setWinner] = useState<Owner | null>(null);
   const [selected, setSelected] = useState<Coord | null>(null);
+  const [stagedAction, setStagedAction] = useState<StagedAction>(null);
   const [laserPath, setLaserPath] = useState<Coord[] | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -81,6 +96,12 @@ export default function KhetGame() {
     return listMoveDestinations(grid, selected, 1);
   }, [selected, grid, winner, busy, currentPlayer]);
 
+  const canSubmit =
+    currentPlayer === 1 &&
+    winner === null &&
+    !busy &&
+    validateStaged(grid, stagedAction);
+
   const runLaserThenAdvance = useCallback(
     (working: ReturnType<typeof cloneGrid>, firer: Owner) => {
       const trace = traceLaser(working, firer);
@@ -101,34 +122,30 @@ export default function KhetGame() {
     [],
   );
 
-  const tryHumanMove = useCallback(
-    (to: Coord) => {
-      if (
-        winner !== null ||
-        busy ||
-        currentPlayer !== 1 ||
-        !selected ||
-        !coordInList(legalDestinations, to)
-      ) {
-        return;
-      }
-      const g = cloneGrid(gridRef.current);
-      applyMove(g, selected, to);
-      setGrid(g);
-      setSelected(null);
-      runLaserThenAdvance(g, 1);
-    },
-    [
-      winner,
-      busy,
-      currentPlayer,
-      selected,
-      legalDestinations,
-      runLaserThenAdvance,
-    ],
-  );
+  const commitHumanTurn = useCallback(() => {
+    if (busy || winner !== null || currentPlayer !== 1) return;
+    const staged = stagedAction;
+    if (!staged || !validateStaged(gridRef.current, staged)) return;
+    const g = cloneGrid(gridRef.current);
+    if (staged.kind === "move") {
+      applyMove(g, staged.from, staged.to);
+    } else {
+      const p = getPiece(g, staged.at)!;
+      g[staged.at.col][staged.at.row] = rotatePieceCw(p);
+    }
+    setGrid(g);
+    setStagedAction(null);
+    setSelected(null);
+    runLaserThenAdvance(g, 1);
+  }, [
+    stagedAction,
+    busy,
+    winner,
+    currentPlayer,
+    runLaserThenAdvance,
+  ]);
 
-  const tryHumanRotate = useCallback(() => {
+  const stageRotate = useCallback(() => {
     if (
       winner !== null ||
       busy ||
@@ -138,24 +155,19 @@ export default function KhetGame() {
     ) {
       return;
     }
-    const g = cloneGrid(gridRef.current);
-    const p = getPiece(g, selected)!;
-    g[selected.col][selected.row] = rotatePieceCw(p);
-    setGrid(g);
-    setSelected(null);
-    runLaserThenAdvance(g, 1);
-  }, [winner, busy, currentPlayer, selected, runLaserThenAdvance]);
+    setStagedAction({ kind: "rotate", at: { ...selected } });
+  }, [winner, busy, currentPlayer, selected]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "r" || e.key === "R") {
         e.preventDefault();
-        tryHumanRotate();
+        stageRotate();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tryHumanRotate]);
+  }, [stageRotate]);
 
   const aiEpoch = useRef(0);
 
@@ -190,13 +202,15 @@ export default function KhetGame() {
     if (currentPlayer === 1) {
       if (piece && piece.owner === 1) {
         setSelected(c);
+        setStagedAction(null);
         return;
       }
       if (selected && coordInList(legalDestinations, c)) {
-        tryHumanMove(c);
+        setStagedAction({ kind: "move", from: { ...selected }, to: c });
         return;
       }
       setSelected(null);
+      setStagedAction(null);
     }
   };
 
@@ -205,11 +219,26 @@ export default function KhetGame() {
     setCurrentPlayer(1);
     setWinner(null);
     setSelected(null);
+    setStagedAction(null);
     setLaserPath(null);
     setBusy(false);
   };
 
   const svgPoints = laserPath ? pathToSegments(laserPath) : [];
+
+  const displayOrientation = (
+    col: number,
+    row: number,
+    piece: Piece,
+  ): Orientation => {
+    if (
+      stagedAction?.kind === "rotate" &&
+      sameCoord(stagedAction.at, { col, row })
+    ) {
+      return rotateOrientationCw(piece.orientation);
+    }
+    return piece.orientation;
+  };
 
   return (
     <div className="flex flex-col items-center gap-6 px-4 py-8 max-w-5xl mx-auto">
@@ -218,13 +247,17 @@ export default function KhetGame() {
           Khet 2.0 — Laser Chess
         </h1>
         <p className="text-sm text-stone-400">
-          Silver (you) moves first. Select a piece, click a highlighted square, or
-          press <kbd className="px-1.5 py-0.5 rounded bg-stone-800 border border-stone-600 text-xs">R</kbd>{" "}
-          to rotate. Red AI replies after each turn.
+          Silver (you): select a piece, choose a destination square or press{" "}
+          <kbd className="px-1.5 py-0.5 rounded bg-stone-800 border border-stone-600 text-xs">
+            R
+          </kbd>{" "}
+          to stage a rotation (not both). Press{" "}
+          <strong className="text-stone-300">Commit move</strong> to apply and fire the laser.
+          Red AI follows.
         </p>
       </header>
 
-      <div className="flex flex-wrap items-center justify-center gap-4 text-sm">
+      <div className="flex flex-wrap items-center justify-center gap-3 text-sm">
         <label className="flex items-center gap-2 text-stone-400">
           <span className="whitespace-nowrap">Red AI</span>
           <select
@@ -259,7 +292,7 @@ export default function KhetGame() {
               {currentPlayer === 1 ? "Silver (you)" : "Red (AI)"}
             </span>
             {busy && (
-              <span className="ml-2 text-cyan-400/90"> — firing laser…</span>
+              <span className="ml-2 text-red-400/90"> — firing laser…</span>
             )}
           </p>
         ) : (
@@ -274,6 +307,28 @@ export default function KhetGame() {
         >
           New game
         </button>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-center gap-3">
+        <button
+          type="button"
+          onClick={commitHumanTurn}
+          disabled={!canSubmit}
+          className={[
+            "rounded-lg px-5 py-2 text-sm font-medium transition border",
+            canSubmit
+              ? "bg-emerald-800 border-emerald-600 text-emerald-50 hover:bg-emerald-700"
+              : "bg-stone-800 border-stone-700 text-stone-500 cursor-not-allowed",
+          ].join(" ")}
+        >
+          Commit move
+        </button>
+        {!canSubmit && currentPlayer === 1 && winner === null && !busy && (
+          <span className="text-xs text-stone-500 max-w-xs text-center">
+            Stage a legal move (adjacent square) or rotation with{" "}
+            <kbd className="px-1 rounded bg-stone-800 border border-stone-600">R</kbd> — not both.
+          </span>
+        )}
       </div>
 
       <div className="relative w-full max-w-[min(100%,720px)] aspect-[10/8] select-none">
@@ -292,6 +347,15 @@ export default function KhetGame() {
               selected &&
               currentPlayer === 1 &&
               coordInList(legalDestinations, { col, row });
+            const isStagedFrom =
+              stagedAction?.kind === "move" &&
+              sameCoord(stagedAction.from, { col, row });
+            const isStagedTo =
+              stagedAction?.kind === "move" &&
+              sameCoord(stagedAction.to, { col, row });
+            const isStagedRotate =
+              stagedAction?.kind === "rotate" &&
+              sameCoord(stagedAction.at, { col, row });
 
             return (
               <button
@@ -302,26 +366,20 @@ export default function KhetGame() {
                   borderCol ? "bg-rose-950/55" : isDark ? "bg-stone-900" : "bg-stone-800",
                   isSel ? "ring-2 ring-amber-400 z-10" : "",
                   isLegal ? "ring-2 ring-emerald-500/90 ring-inset z-10" : "",
+                  isStagedFrom ? "ring-2 ring-sky-400/90 z-10" : "",
+                  isStagedTo ? "ring-2 ring-sky-300 z-10 ring-offset-1 ring-offset-stone-900" : "",
+                  isStagedRotate ? "ring-2 ring-violet-400 z-10" : "",
                 ].join(" ")}
                 onClick={() => onCellClick(col, row)}
                 disabled={busy}
                 aria-label={`Cell ${col},${row}`}
               >
                 {piece && (
-                  <span
-                    className={[
-                      "flex h-[85%] w-[85%] max-h-[52px] max-w-[52px] items-center justify-center rounded-full text-sm font-bold shadow-md border-2",
-                      piece.owner === 1
-                        ? "bg-slate-200 text-stone-900 border-slate-400"
-                        : "bg-orange-700 text-orange-50 border-orange-500",
-                    ].join(" ")}
-                    style={{
-                      transform: `rotate(${piece.orientation * 90}deg)`,
-                    }}
-                    title={`${piece.pieceType} o=${piece.orientation}`}
-                  >
-                    {pieceLabel(piece.pieceType)}
-                  </span>
+                  <PieceGlyph
+                    pieceType={piece.pieceType}
+                    owner={piece.owner}
+                    orientation={displayOrientation(col, row, piece)}
+                  />
                 )}
               </button>
             );
@@ -336,11 +394,12 @@ export default function KhetGame() {
           >
             <polyline
               fill="none"
-              stroke="rgb(34,211,238)"
-              strokeWidth="0.08"
+              stroke="#dc2626"
               strokeLinecap="round"
               strokeLinejoin="round"
-              opacity={0.92}
+              opacity={0.95}
+              vectorEffect="non-scaling-stroke"
+              style={{ strokeWidth: 5 }}
               points={svgPoints.map((p) => `${p.x},${p.y}`).join(" ")}
             />
           </svg>

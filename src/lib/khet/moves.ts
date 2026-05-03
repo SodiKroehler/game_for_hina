@@ -1,4 +1,4 @@
-import type { Coord, Grid, Owner, Piece } from "./types";
+import type { Coord, Grid, Orientation, Owner, Piece } from "./types";
 import { inBounds } from "./direction";
 import { getPiece as gp } from "./grid";
 
@@ -67,11 +67,15 @@ export function canRotatePiece(grid: Grid, at: Coord, player: Owner): boolean {
   return !!(piece && piece.owner === player);
 }
 
-/** Applies clockwise rotation (+1 mod 4). */
+/** Clockwise 90° — up→right→down→left→up. */
+export function rotateOrientationCw(o: Orientation): Orientation {
+  return ((o + 1) % 4) as Orientation;
+}
+
 export function rotatePieceCw(piece: Piece): Piece {
   return {
     ...piece,
-    orientation: (piece.orientation + 1) % 4,
+    orientation: rotateOrientationCw(piece.orientation),
   };
 }
 
