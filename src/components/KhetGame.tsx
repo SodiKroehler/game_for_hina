@@ -7,62 +7,45 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Coord, Orientation, Owner, Piece } from "@/lib/khet/types";
-import { createClassicGrid } from "@/lib/khet/classicSetup";
+import { GameBoard, movesEqual } from "@/lib/gameboard";
+import type { Move, MoveAction } from "@/lib/moves";
 import {
-  applyMove,
-  canRotatePiece,
-  listMoveDestinations,
-  rotateOrientationCw,
-  rotatePieceCw,
-} from "@/lib/khet/moves";
-import { cloneGrid, getPiece } from "@/lib/khet/grid";
-import { applyTraceResult, pathToSegments, traceLaser } from "@/lib/khet/laser";
-import { applyGameAction } from "@/lib/khet/ai";
+  applyLaserResult,
+  pathToSegments,
+  traceLaser,
+} from "@/lib/laser";
+import type { Orientation, Owner, Piece, Position } from "@/lib/piece";
 import { getAiEngine } from "@/ai/registry";
-import type { GameBoard } from "@/ai/types";
 import { PieceGlyph } from "@/components/PieceGlyph";
 
 const LASER_MS = 620;
 const AI_DELAY_MS = 480;
 
-function coordKey(c: Coord): string {
+function coordKey(c: Position): string {
   return `${c.col},${c.row}`;
 }
 
-function sameCoord(a: Coord | null, b: Coord): boolean {
+function samePos(a: Position | null, b: Position): boolean {
   return !!a && a.col === b.col && a.row === b.row;
 }
 
-function coordInList(list: Coord[], c: Coord): boolean {
-  return list.some((x) => x.col === c.col && x.row === c.row);
-}
-
-type StagedAction =
-  | null
-  | { kind: "move"; from: Coord; to: Coord }
-  | { kind: "rotate"; at: Coord };
-
-function validateStaged(grid: ReturnType<typeof cloneGrid>, staged: StagedAction): boolean {
-  if (!staged) return false;
-  if (staged.kind === "move") {
-    return coordInList(listMoveDestinations(grid, staged.from, 1), staged.to);
-  }
-  return canRotatePiece(grid, staged.at, 1);
+function actionTarget(action: MoveAction): Position | null {
+  if (action.type === "move" || action.type === "swap") return action.to;
+  return null;
 }
 
 export default function KhetGame() {
-  const [grid, setGrid] = useState(() => createClassicGrid());
-  const gridRef = useRef(grid);
+  const [board, setBoard] = useState(() => GameBoard.classic());
+  const boardRef = useRef(board);
   useEffect(() => {
-    gridRef.current = grid;
-  }, [grid]);
+    boardRef.current = board;
+  }, [board]);
 
   const [currentPlayer, setCurrentPlayer] = useState<Owner>(1);
   const [winner, setWinner] = useState<Owner | null>(null);
-  const [selected, setSelected] = useState<Coord | null>(null);
-  const [stagedAction, setStagedAction] = useState<StagedAction>(null);
-  const [laserPath, setLaserPath] = useState<Coord[] | null>(null);
+  const [selected, setSelected] = useState<Position | null>(null);
+  const [stagedMove, setStagedMove] = useState<Move | null>(null);
+  const [laserPath, setLaserPath] = useState<Position[] | null>(null);
   const [busy, setBusy] = useState(false);
 
   const [engineIds, setEngineIds] = useState<string[]>([]);
@@ -82,92 +65,98 @@ export default function KhetGame() {
         );
       })
       .catch(() => {
-        if (!cancelled) {
-          setEngineIds([]);
-        }
+        if (!cancelled) setEngineIds([]);
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const legalDestinations = useMemo(() => {
+  const legalTargetsForSelected = useMemo(() => {
     if (!selected || winner !== null || busy || currentPlayer !== 1) return [];
-    return listMoveDestinations(grid, selected, 1);
-  }, [selected, grid, winner, busy, currentPlayer]);
+    return board
+      .getLegalMoves(1)
+      .filter((m) => samePos(m.from, selected))
+      .filter(
+        (m) =>
+          m.action.type === "move" ||
+          m.action.type === "swap",
+      )
+      .map((m) => actionTarget(m.action)!);
+  }, [selected, board, winner, busy, currentPlayer]);
 
   const canSubmit =
     currentPlayer === 1 &&
     winner === null &&
     !busy &&
-    validateStaged(grid, stagedAction);
+    stagedMove !== null &&
+    board.getLegalMoves(1).some((m) => movesEqual(m, stagedMove));
 
-  const runLaserThenAdvance = useCallback(
-    (working: ReturnType<typeof cloneGrid>, firer: Owner) => {
-      const trace = traceLaser(working, firer);
-      setLaserPath(trace.path);
-      setBusy(true);
-      window.setTimeout(() => {
-        const w = applyTraceResult(working, trace);
-        setGrid(cloneGrid(working));
-        setLaserPath(null);
-        setBusy(false);
-        if (w !== null) {
-          setWinner(w);
-          return;
+  const runLaserThenAdvance = useCallback((working: GameBoard, firer: Owner) => {
+    const result = traceLaser(working, firer);
+    setLaserPath(result.path);
+    setBusy(true);
+    window.setTimeout(() => {
+      let win: Owner | null = null;
+      if (result.hit === "pharaoh" && result.hitPosition) {
+        const ph = working.getPiece(result.hitPosition);
+        if (ph?.pieceType === "pharaoh") {
+          win = ph.owner === 1 ? 2 : 1;
         }
-        setCurrentPlayer(firer === 1 ? 2 : 1);
-      }, LASER_MS);
-    },
-    [],
-  );
+      }
+      applyLaserResult(working, result);
+      setBoard(working.clone());
+      setLaserPath(null);
+      setBusy(false);
+      if (win !== null) {
+        setWinner(win);
+        return;
+      }
+      setCurrentPlayer(firer === 1 ? 2 : 1);
+    }, LASER_MS);
+  }, []);
 
   const commitHumanTurn = useCallback(() => {
-    if (busy || winner !== null || currentPlayer !== 1) return;
-    const staged = stagedAction;
-    if (!staged || !validateStaged(gridRef.current, staged)) return;
-    const g = cloneGrid(gridRef.current);
-    if (staged.kind === "move") {
-      applyMove(g, staged.from, staged.to);
-    } else {
-      const p = getPiece(g, staged.at)!;
-      g[staged.at.col][staged.at.row] = rotatePieceCw(p);
-    }
-    setGrid(g);
-    setStagedAction(null);
+    if (!canSubmit || !stagedMove) return;
+    const next = boardRef.current.clone();
+    if (!next.makeMove(stagedMove)) return;
+    console.log("[khet] commit move", stagedMove);
+    setBoard(next);
+    setStagedMove(null);
     setSelected(null);
-    runLaserThenAdvance(g, 1);
-  }, [
-    stagedAction,
-    busy,
-    winner,
-    currentPlayer,
-    runLaserThenAdvance,
-  ]);
+    runLaserThenAdvance(next, 1);
+  }, [canSubmit, stagedMove, runLaserThenAdvance]);
 
-  const stageRotate = useCallback(() => {
+  const stageRotateCw = useCallback(() => {
     if (
       winner !== null ||
       busy ||
       currentPlayer !== 1 ||
-      !selected ||
-      !canRotatePiece(gridRef.current, selected, 1)
+      !selected
     ) {
       return;
     }
-    setStagedAction({ kind: "rotate", at: { ...selected } });
-  }, [winner, busy, currentPlayer, selected]);
+    const candidate: Move = {
+      from: { ...selected },
+      action: { type: "rotate", direction: 1 },
+    };
+    if (!board.getLegalMoves(1).some((m) => movesEqual(m, candidate))) {
+      return;
+    }
+    setStagedMove(candidate);
+    console.log("[khet] stage rotate (CW)", candidate);
+  }, [winner, busy, currentPlayer, selected, board]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "r" || e.key === "R") {
         e.preventDefault();
-        stageRotate();
+        stageRotateCw();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [stageRotate]);
+  }, [stageRotateCw]);
 
   const aiEpoch = useRef(0);
 
@@ -179,49 +168,64 @@ export default function KhetGame() {
       if (epoch !== aiEpoch.current) return;
       const engine = selectedAi ? getAiEngine(selectedAi) : undefined;
       if (!engine) return;
-      const board: GameBoard = {
-        grid: gridRef.current,
-        currentPlayer: 2,
-        winner: null,
-      };
-      const action = engine.makeMove(board);
-      if (!action) return;
-      const g = cloneGrid(gridRef.current);
-      applyGameAction(g, action);
-      setGrid(g);
-      runLaserThenAdvance(g, 2);
+      const m = engine.makeMove(boardRef.current);
+      if (!m) return;
+      console.log("[khet] AI chosen move", m);
+      const next = boardRef.current.clone();
+      if (!next.makeMove(m)) return;
+      setBoard(next);
+      runLaserThenAdvance(next, 2);
     }, AI_DELAY_MS);
     return () => window.clearTimeout(id);
   }, [currentPlayer, winner, runLaserThenAdvance, selectedAi]);
 
+  const pickMoveToSquare = (to: Position): Move | null => {
+    if (!selected) return null;
+    const legal = board.getLegalMoves(1);
+    const found = legal.find(
+      (m) =>
+        samePos(m.from, selected) &&
+        (m.action.type === "move" || m.action.type === "swap") &&
+        actionTarget(m.action) &&
+        samePos(actionTarget(m.action)!, to),
+    );
+    return found ?? null;
+  };
+
   const onCellClick = (col: number, row: number) => {
     if (winner !== null || busy) return;
-    const c: Coord = { col, row };
-    const piece = getPiece(grid, c);
+    const c: Position = { col, row };
+    const piece = board.getPiece(c);
 
     if (currentPlayer === 1) {
       if (piece && piece.owner === 1) {
         setSelected(c);
-        setStagedAction(null);
+        setStagedMove(null);
+        console.log("[khet] select piece start", c);
         return;
       }
-      if (selected && coordInList(legalDestinations, c)) {
-        setStagedAction({ kind: "move", from: { ...selected }, to: c });
-        return;
+      if (selected) {
+        const mv = pickMoveToSquare(c);
+        if (mv) {
+          setStagedMove(mv);
+          console.log("[khet] stage move/swap", mv);
+          return;
+        }
       }
       setSelected(null);
-      setStagedAction(null);
+      setStagedMove(null);
     }
   };
 
   const reset = () => {
-    setGrid(createClassicGrid());
+    setBoard(GameBoard.classic());
     setCurrentPlayer(1);
     setWinner(null);
     setSelected(null);
-    setStagedAction(null);
+    setStagedMove(null);
     setLaserPath(null);
     setBusy(false);
+    console.log("[khet] new game");
   };
 
   const svgPoints = laserPath ? pathToSegments(laserPath) : [];
@@ -232,10 +236,10 @@ export default function KhetGame() {
     piece: Piece,
   ): Orientation => {
     if (
-      stagedAction?.kind === "rotate" &&
-      sameCoord(stagedAction.at, { col, row })
+      stagedMove?.action.type === "rotate" &&
+      samePos(stagedMove.from, { col, row })
     ) {
-      return rotateOrientationCw(piece.orientation);
+      return ((((piece.orientation as number) + 1) % 4) + 4) % 4 as Orientation;
     }
     return piece.orientation;
   };
@@ -247,13 +251,11 @@ export default function KhetGame() {
           Khet 2.0 — Laser Chess
         </h1>
         <p className="text-sm text-stone-400">
-          Silver (you): select a piece, choose a destination square or press{" "}
+          Silver (you): select a piece (light blue outline), choose a destination or press{" "}
           <kbd className="px-1.5 py-0.5 rounded bg-stone-800 border border-stone-600 text-xs">
             R
           </kbd>{" "}
-          to stage a rotation (not both). Press{" "}
-          <strong className="text-stone-300">Commit move</strong> to apply and fire the laser.
-          Red AI follows.
+          to stage rotation. Press <strong className="text-stone-300">Commit move</strong> to apply and fire the laser.
         </p>
       </header>
 
@@ -323,12 +325,6 @@ export default function KhetGame() {
         >
           Commit move
         </button>
-        {!canSubmit && currentPlayer === 1 && winner === null && !busy && (
-          <span className="text-xs text-stone-500 max-w-xs text-center">
-            Stage a legal move (adjacent square) or rotation with{" "}
-            <kbd className="px-1 rounded bg-stone-800 border border-stone-600">R</kbd> — not both.
-          </span>
-        )}
       </div>
 
       <div className="relative w-full max-w-[min(100%,720px)] aspect-[10/8] select-none">
@@ -339,23 +335,31 @@ export default function KhetGame() {
           {Array.from({ length: 80 }, (_, i) => {
             const row = Math.floor(i / 10);
             const col = i % 10;
-            const piece = grid[col][row];
+            const piece = board.getPiece({ col, row });
             const isDark = (col + row) % 2 === 0;
             const borderCol = col === 0 || col === 9;
-            const isSel = sameCoord(selected, { col, row });
+            const isSelectStart =
+              selected &&
+              currentPlayer === 1 &&
+              samePos(selected, { col, row });
             const isLegal =
               selected &&
               currentPlayer === 1 &&
-              coordInList(legalDestinations, { col, row });
+              legalTargetsForSelected.some((t) => t.col === col && t.row === row);
             const isStagedFrom =
-              stagedAction?.kind === "move" &&
-              sameCoord(stagedAction.from, { col, row });
+              stagedMove &&
+              (stagedMove.action.type === "move" ||
+                stagedMove.action.type === "swap") &&
+              samePos(stagedMove.from, { col, row });
             const isStagedTo =
-              stagedAction?.kind === "move" &&
-              sameCoord(stagedAction.to, { col, row });
+              stagedMove &&
+              (stagedMove.action.type === "move" ||
+                stagedMove.action.type === "swap") &&
+              actionTarget(stagedMove.action) &&
+              samePos(actionTarget(stagedMove.action)!, { col, row });
             const isStagedRotate =
-              stagedAction?.kind === "rotate" &&
-              sameCoord(stagedAction.at, { col, row });
+              stagedMove?.action.type === "rotate" &&
+              samePos(stagedMove.from, { col, row });
 
             return (
               <button
@@ -364,7 +368,7 @@ export default function KhetGame() {
                 className={[
                   "relative flex items-center justify-center min-h-0 transition outline-none focus-visible:ring-2 focus-visible:ring-cyan-500/80",
                   borderCol ? "bg-rose-950/55" : isDark ? "bg-stone-900" : "bg-stone-800",
-                  isSel ? "ring-2 ring-amber-400 z-10" : "",
+                  isSelectStart ? "ring-2 ring-sky-400 z-10 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.5)]" : "",
                   isLegal ? "ring-2 ring-emerald-500/90 ring-inset z-10" : "",
                   isStagedFrom ? "ring-2 ring-sky-400/90 z-10" : "",
                   isStagedTo ? "ring-2 ring-sky-300 z-10 ring-offset-1 ring-offset-stone-900" : "",
@@ -407,8 +411,7 @@ export default function KhetGame() {
       </div>
 
       <footer className="text-xs text-stone-500 text-center max-w-lg">
-        Coordinates (col, row) start at the top-left. Border columns 0 and 9 are
-        restricted home columns (silver left, red right).
+        Coordinates (col, row) start at the top-left. Columns 0 and 9 are restricted home columns.
       </footer>
     </div>
   );

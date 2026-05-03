@@ -1,5 +1,5 @@
-import type { Orientation, Owner, PieceType } from "@/lib/khet/types";
-import { pieceLabel } from "@/lib/khet/pieces";
+import type { Orientation, Owner, PieceType } from "@/lib/piece";
+import { pieceLabel } from "@/lib/piece";
 
 const silverFill = "#e2e8f0";
 const silverStroke = "#64748b";
@@ -12,7 +12,7 @@ function colors(owner: Owner) {
     : { fill: redFill, stroke: redStroke, text: "#fff7ed" };
 }
 
-/** Right triangle with hypotenuse on the NW–SE diagonal; orientation rotates which corner is the right angle. */
+/** Glyph rendering — preserved from earlier `PieceGlyph` implementation. */
 export function PyramidGlyph({
   owner,
   orientation,
@@ -29,7 +29,6 @@ export function PyramidGlyph({
       aria-hidden
     >
       <g transform={`rotate(${o * 90} 50 50)`}>
-        {/* Right angle at bottom-right; hypotenuse NW–SE (45° to cell edges) */}
         <polygon
           points="100,100 100,0 0,0"
           fill={fill}
@@ -42,7 +41,6 @@ export function PyramidGlyph({
   );
 }
 
-/** Narrow rectangle along a diagonal (flat faces at 45° to the cell sides). */
 export function ScarabGlyph({
   owner,
   orientation,
