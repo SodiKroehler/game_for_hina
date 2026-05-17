@@ -107,8 +107,8 @@ html:has(.for-gma-root) body {
 }
 
 .for-gma-cell-img {
-  width: 62%;
-  height: 62%;
+  width: 93%;
+  height: 93%;
   object-fit: contain;
   pointer-events: none;
   transition: filter 0.4s ease, opacity 0.4s ease;

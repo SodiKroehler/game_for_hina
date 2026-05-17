@@ -13,7 +13,9 @@ import { ButterflyOverlay } from "./butterfly";
 const GRID = 5;
 const RED_COUNT = 7;
 const CELL_COUNT = GRID * GRID;
-const VITALITY_DECAY_MS = 5_000;
+const VITALITY_DECAY_MS = 30_000;
+const VIT_FULL_UNTIL = 25 / 30; // full color for first ~5s
+const VIT_GRAY_UNTIL = 10 / 30; // fully gray by ~20s, gone by ~30s
 const REVITALIZE_PAUSE_MS = 30_000;
 
 type Cell =
@@ -49,15 +51,16 @@ function newFlower(): Cell {
 }
 
 function flowerVisuals(vitality: number): CSSProperties {
-  if (vitality > 0.6) return {};
-  if (vitality > 0.2) {
-    const t = (0.6 - vitality) / 0.4;
+  if (vitality > VIT_FULL_UNTIL) return {};
+  if (vitality > VIT_GRAY_UNTIL) {
+    const t = (VIT_FULL_UNTIL - vitality) / (VIT_FULL_UNTIL - VIT_GRAY_UNTIL);
     const sat = 1 - t * 0.85;
     return { filter: `saturate(${sat}) sepia(${t * 0.2})` };
   }
+  const t = (VIT_GRAY_UNTIL - vitality) / VIT_GRAY_UNTIL;
   return {
     filter: "saturate(0.12) sepia(0.22)",
-    opacity: vitality / 0.2,
+    opacity: 1 - t,
   };
 }
 
