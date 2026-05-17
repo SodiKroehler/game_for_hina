@@ -1,0 +1,125 @@
+/* Scoped reset for /forGma only */
+html:has(.for-gma-root),
+html:has(.for-gma-root) body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.for-gma-root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  background: #e8e4dc;
+}
+
+.for-gma-red-count {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 10;
+  font-family: Georgia, "Times New Roman", Times, serif;
+  font-size: 3rem;
+  line-height: 1;
+  color: #3d2020;
+  pointer-events: none;
+}
+
+.for-gma-green-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    165deg,
+    #e4f5df 0%,
+    #c8ebc0 45%,
+    #a8d9a0 100%
+  );
+  transition: opacity 1s ease;
+}
+
+.for-gma-root.is-celebration .for-gma-green-bg {
+  opacity: 1;
+}
+
+.for-gma-grid {
+  position: relative;
+  z-index: 0;
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  grid-template-rows: repeat(5, 1fr);
+  gap: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+.for-gma-cell {
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: #f5f2eb;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: background-color 0.15s ease;
+}
+
+.for-gma-cell:disabled {
+  cursor: default;
+  pointer-events: none;
+}
+
+.for-gma-cell.is-red {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.for-gma-cell.is-red,
+.for-gma-cell.is-blue {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f5f2eb;
+}
+
+.for-gma-cell-img {
+  width: 62%;
+  height: 62%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* Butterfly overlay (used only if ButterflyOverlay is mounted) */
+.for-gma-butterfly {
+  position: absolute;
+  z-index: 3;
+  width: clamp(48px, 10vw, 72px);
+  height: clamp(48px, 10vw, 72px);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.for-gma-butterfly img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
