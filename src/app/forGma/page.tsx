@@ -6,7 +6,7 @@ import { ButterflyOverlay } from "./butterfly";
 
 const GRID = 5;
 const RED_COUNT = 7;
-const REMOVE_FLOWER_CHANCE = 0.6;
+const REMOVE_FLOWER_CHANCE = 0.01;
 const CELL_COUNT = GRID * GRID;
 
 type CellState = "empty" | "red" | "blue";
