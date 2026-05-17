@@ -5,7 +5,8 @@ import { forGmaAssets } from "./assets";
 import { ButterflyOverlay } from "./butterfly";
 
 const GRID = 5;
-const RED_COUNT = 5;
+const RED_COUNT = 7;
+const REMOVE_FLOWER_CHANCE = 0.6;
 const CELL_COUNT = GRID * GRID;
 
 type CellState = "empty" | "red" | "blue";
@@ -16,6 +17,11 @@ function pickRedIndices(): number[] {
     indices.add(Math.floor(Math.random() * CELL_COUNT));
   }
   return Array.from(indices);
+}
+
+function pickRandomIndex(candidates: number[]): number | null {
+  if (candidates.length === 0) return null;
+  return candidates[Math.floor(Math.random() * candidates.length)];
 }
 
 function buildInitialCells(): CellState[] {
@@ -48,6 +54,22 @@ export default function ForGmaPage() {
       if (!prev || prev[index] !== "red") return prev;
       const next = [...prev];
       next[index] = "blue";
+
+      const emptySlots: number[] = [];
+      const flowerSlots: number[] = [];
+      for (let i = 0; i < next.length; i++) {
+        if (next[i] === "empty") emptySlots.push(i);
+        else if (next[i] === "blue" && i !== index) flowerSlots.push(i);
+      }
+
+      const spawnAt = pickRandomIndex(emptySlots);
+      if (spawnAt !== null) next[spawnAt] = "red";
+
+      if (Math.random() < REMOVE_FLOWER_CHANCE) {
+        const removeAt = pickRandomIndex(flowerSlots);
+        if (removeAt !== null) next[removeAt] = "empty";
+      }
+
       return next;
     });
   }, []);
