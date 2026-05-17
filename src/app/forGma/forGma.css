@@ -101,11 +101,33 @@ html:has(.for-gma-root) body {
   background: #f5f2eb;
 }
 
+.for-gma-cell.is-blue {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
 .for-gma-cell-img {
   width: 62%;
   height: 62%;
   object-fit: contain;
   pointer-events: none;
+  transition: filter 0.4s ease, opacity 0.4s ease;
+}
+
+.for-gma-cell-img.is-pulse {
+  animation: for-gma-revitalize 0.45s ease;
+}
+
+@keyframes for-gma-revitalize {
+  0% {
+    transform: scale(1);
+  }
+  45% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 /* Butterfly overlay (used only if ButterflyOverlay is mounted) */
